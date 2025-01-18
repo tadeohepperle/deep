@@ -1,4 +1,4 @@
-package automm
+package deep
 
 import "base:intrinsics"
 import "base:runtime"
@@ -163,13 +163,14 @@ _clone_allocations_inplace :: proc(
 			old_key := rawptr(runtime.map_cell_index_dynamic(ks, map_info.ks, bucket_index))
 			old_val := rawptr(runtime.map_cell_index_dynamic(vs, map_info.vs, bucket_index))
 
-			key_place, value_place, just_inserted, err := runtime.__dynamic_map_entry(
+			hash := map_info.key_hasher(old_key, runtime.map_seed(raw_map^))
+			runtime.__dynamic_map_set(raw_map, map_info, hash, old_key, old_val)
+			key_place, value_place := runtime.__dynamic_map_get_key_and_value(
 				raw_map,
 				map_info,
+				hash,
 				old_key,
-				old_val,
 			)
-			assert(just_inserted, "cloning hashmap should not cause keys with same hash")
 			if !key_ty_is_copy {
 				print("key: ", any{old_key, key_ty.id}, " from ", old_key, "to", key_place)
 				_clone_allocations_inplace(key_ty, key_place, allocator, true)

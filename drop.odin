@@ -1,4 +1,4 @@
-package automm
+package deep
 
 import "base:intrinsics"
 import "base:runtime"
@@ -88,6 +88,7 @@ _drop_allocations_inplace :: proc(
 		}
 		return
 	case runtime.Type_Info_Struct:
+		// todo: allow for ignoring fields here.
 		for f_idx in 0 ..< var.field_count {
 			field_place := rawptr(uintptr(place) + var.offsets[f_idx])
 			_drop_allocations_inplace(var.types[f_idx], field_place, allocator, false)
@@ -96,8 +97,7 @@ _drop_allocations_inplace :: proc(
 	case runtime.Type_Info_Union:
 		// special case handling of ptr unions with nil niche optimization:
 		if len(var.variants) == 1 {
-			only_ty := var.variants[0]
-			#partial switch v in only_ty.variant {
+			#partial switch v in var.variants[0].variant {
 			case runtime.Type_Info_Pointer:
 				_drop_ptr_type_allocation_inplace(v.elem, place, allocator)
 				return
@@ -151,6 +151,7 @@ _drop_allocations_inplace :: proc(
 				}
 			}
 		}
+		print("Free map")
 		err := runtime.map_free_dynamic(raw_map, map_info)
 		assert(err == .None)
 		return

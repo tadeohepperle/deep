@@ -1,4 +1,4 @@
-package automm
+package deep
 
 import "base:intrinsics"
 import "base:runtime"
@@ -19,80 +19,109 @@ Raw_Map :: runtime.Raw_Map
 Raw_Dynamic_Array :: runtime.Raw_Dynamic_Array
 
 
-Logging_Allocator_Data :: struct {
-	backing: mem.Allocator,
-}
-
-logging_allocator :: proc(data: ^Logging_Allocator_Data) -> mem.Allocator {
-	// `package log` uses context.temp_allocator and temp_allocator is lazily initialized.  Dummy allocate here
-	// to make sure it doesn't use context.allocator within our custom allocator procedure.
-	dummy := new(int, context.temp_allocator)
-
-	return mem.Allocator {
-		data = data,
-		procedure = proc(
-			allocator_data: rawptr,
-			mode: runtime.Allocator_Mode,
-			size, alignment: int,
-			old_memory: rawptr,
-			old_size: int,
-			location := #caller_location,
-		) -> (
-			[]byte,
-			runtime.Allocator_Error,
-		) {
-			data := cast(^Logging_Allocator_Data)allocator_data
-			log.infof(
-				"{}: size={} alignment={} old_memory={} old_size={}, loc={}",
-				mode,
-				size,
-				alignment,
-				old_memory,
-				old_size,
-				location,
-			)
-			result, err := data.backing.procedure(
-				data.backing.data,
-				mode,
-				size,
-				alignment,
-				old_memory,
-				old_size,
-				location,
-			)
-			log.infof(" = %p  %v", result, err)
-			return result, err
-		},
-	}
-}
-
 main :: proc() {
-	context.logger = log.create_console_logger()
-	logging_allocator_data := Logging_Allocator_Data {
-		backing = context.allocator,
+	MyStruct :: struct {
+		v:    union #no_nil {
+			string,
+			int,
+			bool,
+		},
+		nums: []int,
 	}
-	context.allocator = logging_allocator(&logging_allocator_data)
+	print(random([3]MyStruct))
 
-	Data :: struct {
-		m:    map[string][]int,
-		name: string,
-	}
-	a := Data {
-		name = "Hello",
-	}
-	a.m["What"] = {2, 3, 4, 5, 3, 3}
-	a.m["This"] = {2, 4, 5, 3, 3, 3}
-	a.m["I Can See"] = nil
-	print("\nCLONE\n")
-	b := clone(a)
-	print("\nDROP\n")
-	drop(&b)
-	// print(a)
-	// print(b)
-	// drop(&b)
+	// MyStruct :: struct {
+	// 	f: f32,
+	// 	i: int,
+	// }
+	// MyTy :: struct {
+	// 	f: f32,
+	// 	i: int,
+	// 	s: string,
+	// 	m: map[string]^Thing,
+	// }
+	// Thing :: struct {
+	// 	name:    string,
+	// 	numbers: []int,
+	// }
+	// a := MyTy {
+	// 	f = 1.2,
+	// 	i = 3,
+	// 	s = "Hello",
+	// }
+	// a.m["one"] = &Thing{name = "Clause", numbers = {1, 2, 3}}
+	// a.m["two"] = &Thing{name = "Clause", numbers = {1, 222, 3}}
+
+	// b := MyTy {
+	// 	f = 1.2,
+	// 	i = 3,
+	// 	s = fmt.aprint("Hello"),
+	// }
+	// b_nums := make([]int, 3)
+	// b_nums[0] = 1
+	// b_nums[1] = 2
+	// b_nums[2] = 3
+	// b.m["one"] = &Thing{name = "Clause", numbers = b_nums}
+	// b.m["two"] = &Thing{name = "Clause", numbers = b_nums}
+
+	// print(equal(a, b))
 	// print(a)
 	// print(b)
 }
+
+// main :: proc() {
+// 	// context.logger = log.create_console_logger()
+// 	// logging_allocator_data := Logging_Allocator_Data {
+// 	// 	backing = context.allocator,
+// 	// }
+// 	// context.allocator = logging_allocator(&logging_allocator_data)
+
+// 	track: mem.Tracking_Allocator
+// 	mem.tracking_allocator_init(&track, context.allocator)
+// 	context.allocator = mem.tracking_allocator(&track)
+
+// 	defer {
+// 		if len(track.allocation_map) > 0 {
+// 			fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+// 			for _, entry in track.allocation_map {
+// 				fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+// 			}
+// 		}
+// 		if len(track.bad_free_array) > 0 {
+// 			fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+// 			for entry in track.bad_free_array {
+// 				fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+// 			}
+// 		}
+// 		mem.tracking_allocator_destroy(&track)
+// 	}
+
+// 	Data :: struct {
+// 		m:    map[string][]int,
+// 		name: string,
+// 	}
+// 	a := Data {
+// 		name = "Hello",
+// 	}
+// 	a.m["What"] = {2, 3, 4, 5, 3, 3}
+// 	a.m["This"] = {2, 4, 5, 3, 3, 3}
+// 	a.m["I Can See"] = nil
+// 	a.m["lol lol"] = {3, 4, 5}
+// 	print("\nCLONE\n")
+// 	b := clone(a)
+// 	delete(a.m)
+// 	print("\nDROP\n")
+// 	drop(&b)
+
+
+// 	print(equal(a, b))
+
+// 	// print(a)
+// 	// print(b)
+// 	// drop(&b)
+// 	// print(a)
+// 	// print(b)
+// }
 
 dbg_type :: proc(id: typeid) {
 	ty := runtime.type_info_base(type_info_of(id))
@@ -102,6 +131,58 @@ dbg_type :: proc(id: typeid) {
 		print("    flags:", var.flags)
 		print("    equal proc:", var.equal)
 	}
+}
+is_type_supported :: proc(type_id: typeid) -> bool {
+	return _is_type_supported(type_info_of(type_id))
+}
+_is_type_supported :: proc(ty: Type_Info) -> bool {
+	#partial switch var in ty.variant {
+	case runtime.Type_Info_Integer,
+	     runtime.Type_Info_Rune,
+	     runtime.Type_Info_Float,
+	     runtime.Type_Info_Complex,
+	     runtime.Type_Info_Quaternion,
+	     runtime.Type_Info_Boolean,
+	     runtime.Type_Info_Bit_Set,
+	     runtime.Type_Info_Enum,
+	     runtime.Type_Info_Matrix,
+	     runtime.Type_Info_Simd_Vector,
+	     runtime.Type_Info_Type_Id:
+		return true
+	case runtime.Type_Info_Named:
+		return _is_type_supported(type_info_base(ty))
+	case runtime.Type_Info_Pointer:
+		return _is_type_supported(var.elem)
+	case runtime.Type_Info_Slice:
+		return _is_type_supported(var.elem)
+	case runtime.Type_Info_Dynamic_Array:
+		return _is_type_supported(var.elem)
+	case runtime.Type_Info_Array:
+		return _is_type_supported(var.elem)
+	case runtime.Type_Info_Enumerated_Array:
+		return _is_type_supported(var.elem)
+	case runtime.Type_Info_Struct:
+		// todo: allow for ignoring fields here.
+		for f_idx in 0 ..< var.field_count {
+			if !_is_type_supported(var.types[f_idx]) {
+				return false
+			}
+		}
+		return true
+	case runtime.Type_Info_Union:
+		for variant_ty in var.variants {
+			if !_is_type_supported(variant_ty) {
+				return false
+			}
+		}
+		return true
+	case runtime.Type_Info_Map:
+		if var.map_info == nil {
+			return false
+		}
+		return _is_type_supported(var.key) && _is_type_supported(var.value)
+	}
+	return false
 }
 
 is_copy_type :: proc(ty: Type_Info) -> bool {
@@ -169,4 +250,51 @@ _get_union_tag_for_non_ptr_union :: proc(
 		unimplemented()
 	}
 	return tag
+}
+
+Logging_Allocator_Data :: struct {
+	backing: mem.Allocator,
+}
+
+logging_allocator :: proc(data: ^Logging_Allocator_Data) -> mem.Allocator {
+	// `package log` uses context.temp_allocator and temp_allocator is lazily initialized.  Dummy allocate here
+	// to make sure it doesn't use context.allocator within our custom allocator procedure.
+	dummy := new(int, context.temp_allocator)
+
+	return mem.Allocator {
+		data = data,
+		procedure = proc(
+			allocator_data: rawptr,
+			mode: runtime.Allocator_Mode,
+			size, alignment: int,
+			old_memory: rawptr,
+			old_size: int,
+			location := #caller_location,
+		) -> (
+			[]byte,
+			runtime.Allocator_Error,
+		) {
+			data := cast(^Logging_Allocator_Data)allocator_data
+			log.infof(
+				"{}: size={} alignment={} old_memory={} old_size={}, loc={}",
+				mode,
+				size,
+				alignment,
+				old_memory,
+				old_size,
+				location,
+			)
+			result, err := data.backing.procedure(
+				data.backing.data,
+				mode,
+				size,
+				alignment,
+				old_memory,
+				old_size,
+				location,
+			)
+			log.infof(" = %p  %v", result, err)
+			return result, err
+		},
+	}
 }
