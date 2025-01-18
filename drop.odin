@@ -23,7 +23,7 @@ _drop_allocations_inplace :: proc(
 	#partial switch var in ty.variant {
 	case runtime.Type_Info_Named:
 		base_ty := type_info_base(ty)
-		_drop_allocations_inplace(base_ty, place, allocator, false)
+		_drop_allocations_inplace(base_ty, place, allocator, true)
 		return
 	case runtime.Type_Info_Pointer:
 		_drop_ptr_type_allocation_inplace(var.elem, place, allocator)

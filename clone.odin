@@ -28,7 +28,7 @@ _clone_allocations_inplace :: proc(
 	#partial switch var in ty.variant {
 	case runtime.Type_Info_Named:
 		base_ty := type_info_base(ty)
-		_clone_allocations_inplace(base_ty, place, allocator, false)
+		_clone_allocations_inplace(base_ty, place, allocator, true)
 		return
 	case runtime.Type_Info_Pointer:
 		_clone_ptr_type_allocation_inplace(var.elem, place, allocator)
@@ -172,11 +172,11 @@ _clone_allocations_inplace :: proc(
 				old_key,
 			)
 			if !key_ty_is_copy {
-				print("key: ", any{old_key, key_ty.id}, " from ", old_key, "to", key_place)
+				// print("key: ", any{old_key, key_ty.id}, " from ", old_key, "to", key_place)
 				_clone_allocations_inplace(key_ty, key_place, allocator, true)
 			}
 			if !value_ty_is_copy {
-				print("value:", any{old_val, value_ty.id}, " from ", old_val, "to", value_place)
+				// print("value:", any{old_val, value_ty.id}, " from ", old_val, "to", value_place)
 				_clone_allocations_inplace(value_ty, value_place, allocator, true)
 			}
 		}

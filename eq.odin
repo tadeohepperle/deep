@@ -9,27 +9,6 @@ equal :: proc(a: $T, b: T) -> bool {
 	b := b
 	return _any_eq(type_info_of(T), &a, &b, false)
 }
-_slice_eq :: proc(elem_ty: Type_Info, a_slice: ^Raw_Slice, b_slice: ^Raw_Slice) -> bool {
-	if a_slice.len != b_slice.len {
-		return false
-	}
-	if a_slice.data == b_slice.data {
-		return true
-	}
-	if is_copy_type(elem_ty) {
-		return runtime.memory_compare(a_slice.data, b_slice.data, a_slice.len * elem_ty.size) == 0
-	}
-	for idx in 0 ..< a_slice.len {
-		offset := uintptr(idx * elem_ty.size)
-		a_elem_place := rawptr(uintptr(a_slice.data) + offset)
-		b_elem_place := rawptr(uintptr(b_slice.data) + offset)
-		if !_any_eq(elem_ty, a_elem_place, b_elem_place, true) {
-			return false
-		}
-	}
-	return true
-}
-
 // todo: maybe return an int like runtime.memory_compare instead here?
 //  1 if a > b
 // -1 if b > a
@@ -43,7 +22,7 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 	#partial switch var in ty.variant {
 	case runtime.Type_Info_Named:
 		base_ty := type_info_base(ty)
-		return _any_eq(base_ty, a, b, false)
+		return _any_eq(base_ty, a, b, true)
 	case runtime.Type_Info_Pointer:
 		return _any_eq(var.elem, (cast(^rawptr)a)^, (cast(^rawptr)b)^, false)
 	case runtime.Type_Info_Slice:
@@ -191,4 +170,25 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 		return true
 	}
 	unimplemented(tprint("Unsupported type for equality check: ", ty))
+}
+
+_slice_eq :: proc(elem_ty: Type_Info, a_slice: ^Raw_Slice, b_slice: ^Raw_Slice) -> bool {
+	if a_slice.len != b_slice.len {
+		return false
+	}
+	if a_slice.data == b_slice.data {
+		return true
+	}
+	if is_copy_type(elem_ty) {
+		return runtime.memory_compare(a_slice.data, b_slice.data, a_slice.len * elem_ty.size) == 0
+	}
+	for idx in 0 ..< a_slice.len {
+		offset := uintptr(idx * elem_ty.size)
+		a_elem_place := rawptr(uintptr(a_slice.data) + offset)
+		b_elem_place := rawptr(uintptr(b_slice.data) + offset)
+		if !_any_eq(elem_ty, a_elem_place, b_elem_place, true) {
+			return false
+		}
+	}
+	return true
 }

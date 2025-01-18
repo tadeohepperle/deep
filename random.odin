@@ -239,28 +239,8 @@ _construct_any_random :: proc(
 		}
 		// generate a random tag:
 		variant_idx := rand.int_max(len(var.variants))
-		tag_val := variant_idx if var.no_nil else variant_idx + 1
-		tag_any := any{rawptr(uintptr(place) + var.tag_offset), var.tag_type.id}
-		switch &tag in tag_any {
-		case u8:
-			tag = u8(tag_val)
-		case i8:
-			tag = i8(tag_val)
-		case u16:
-			tag = u16(tag_val)
-		case i16:
-			tag = i16(tag_val)
-		case u32:
-			tag = u32(tag_val)
-		case i32:
-			tag = i32(tag_val)
-		case u64:
-			tag = u64(tag_val)
-		case i64:
-			tag = i64(tag_val)
-		case:
-			unimplemented(tprint("unsupported tag:", var.tag_type.id, "for", ty))
-		}
+		tag := variant_idx if var.no_nil else variant_idx + 1
+		_set_union_tag_for_non_ptr_union(var, place, tag)
 		variant_ty := var.variants[variant_idx]
 		_construct_any_random(variant_ty, place, options, allocator, depth)
 		return
@@ -303,6 +283,7 @@ _construct_any_random :: proc(
 		assert(runtime.map_len(raw_map^) == 0)
 		assert(runtime.map_cap(raw_map^) == 0)
 
+		raw_map.allocator = allocator
 		map_len := rand.int_max(options.max_map_len + 1)
 		if map_len == 0 || depth >= options.max_depth {
 			return
@@ -310,10 +291,13 @@ _construct_any_random :: proc(
 		key_ty := var.key
 		value_ty := var.value
 		// we need a bit of scratchspace to construct random keys before they are inserted into the map:
-		key_scratch, err := mem.alloc(key_ty.size, key_ty.align, context.temp_allocator)
-		assert(err == .None)
-		value_scratch, err2 := mem.alloc(value_ty.size, key_ty.align, context.temp_allocator)
-		assert(err2 == .None)
+
+		key_scratch, value_scratch: rawptr
+		alloc_err: runtime.Allocator_Error
+		key_scratch, alloc_err = mem.alloc(key_ty.size, key_ty.align, context.temp_allocator)
+		assert(alloc_err == .None)
+		value_scratch, alloc_err = mem.alloc(value_ty.size, key_ty.align, context.temp_allocator)
+		assert(alloc_err == .None)
 		for _ in 0 ..< map_len {
 			_construct_any_random(key_ty, key_scratch, options, allocator, depth + 1)
 			hash := map_info.key_hasher(key_scratch, runtime.map_seed(raw_map^))

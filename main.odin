@@ -18,14 +18,44 @@ Raw_Slice :: runtime.Raw_Slice
 Raw_Map :: runtime.Raw_Map
 Raw_Dynamic_Array :: runtime.Raw_Dynamic_Array
 main :: proc() {
+
 	MyStruct :: struct {
-		num:      int,
+		v:        int,
 		name:     string,
-		leads_to: map[string]^MyStruct,
+		nums:     []int,
+		contacts: map[string]int,
 	}
-	val := random(MyStruct)
-	print(val)
-	drop(&val)
+	a := MyStruct {
+		v    = 3,
+		name = "Tadeo",
+		nums = {33, 44, 55},
+	}
+	a.contacts["Ju"] = 8888
+	a.contacts["Foo Bar"] = 9999
+	buf := encode(a)
+	print(buf)
+
+	remove_range(&buf, 57, 60)
+	validate_err := validate_encoding(MyStruct, buf[:])
+	print("validate err:", validate_err)
+
+
+	b, err := decode(MyStruct, buf[:])
+	if err != .None {
+		print("Error:", err)
+	} else {
+		print("Success: ", b)
+	}
+	// MyStruct :: struct {
+	// 	num:      int,
+	// 	name:     string,
+	// 	leads_to: map[string]^MyStruct,
+	// }
+	// val := random(MyStruct)
+	// print(val)
+	// drop(&val)
+
+
 	// MyStruct :: struct {
 	// 	f: f32,
 	// 	i: int,
@@ -199,6 +229,8 @@ is_copy_type :: proc(ty: Type_Info) -> bool {
 		return is_copy_type(var.elem)
 	case runtime.Type_Info_Enumerated_Array:
 		return is_copy_type(var.elem)
+	case runtime.Type_Info_Named:
+		return is_copy_type(type_info_base(ty))
 	case runtime.Type_Info_Struct:
 		// todo: or field is tagged as static or borrowed, then also is copy
 		for f_idx in 0 ..< var.field_count {
@@ -217,35 +249,65 @@ is_copy_type :: proc(ty: Type_Info) -> bool {
 	}
 	return false
 }
+
 _get_union_tag_for_non_ptr_union :: proc(
 	union_info: runtime.Type_Info_Union,
 	union_ptr: rawptr,
-) -> int {
+) -> (
+	val: int,
+) {
 	tag_ptr := uintptr(union_ptr) + union_info.tag_offset
 	tag_any := any{rawptr(tag_ptr), union_info.tag_type.id}
 
-	tag: int = ---
 	switch i in tag_any {
 	case u8:
-		tag = int(i)
+		val = int(i)
 	case i8:
-		tag = int(i)
+		val = int(i)
 	case u16:
-		tag = int(i)
+		val = int(i)
 	case i16:
-		tag = int(i)
+		val = int(i)
 	case u32:
-		tag = int(i)
+		val = int(i)
 	case i32:
-		tag = int(i)
+		val = int(i)
 	case u64:
-		tag = int(i)
+		val = int(i)
 	case i64:
-		tag = int(i)
+		val = int(i)
 	case:
-		unimplemented()
+		unimplemented(tprint("unsupported union tag:", union_info.tag_type.id))
 	}
-	return tag
+	return val
+}
+_set_union_tag_for_non_ptr_union :: proc(
+	union_info: runtime.Type_Info_Union,
+	union_ptr: rawptr,
+	val: int,
+) {
+	tag_ptr := uintptr(union_ptr) + union_info.tag_offset
+	tag_any := any{rawptr(tag_ptr), union_info.tag_type.id}
+	switch &tag in tag_any {
+	case u8:
+		tag = u8(val)
+	case i8:
+		tag = i8(val)
+	case u16:
+		tag = u16(val)
+	case i16:
+		tag = i16(val)
+	case u32:
+		tag = u32(val)
+	case i32:
+		tag = i32(val)
+	case u64:
+		tag = u64(val)
+	case i64:
+		tag = i64(val)
+	case:
+		unimplemented(tprint("unsupported union tag:", union_info.tag_type.id))
+	}
 }
 
 Logging_Allocator_Data :: struct {
