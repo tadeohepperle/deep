@@ -17,19 +17,15 @@ Raw_String :: runtime.Raw_String
 Raw_Slice :: runtime.Raw_Slice
 Raw_Map :: runtime.Raw_Map
 Raw_Dynamic_Array :: runtime.Raw_Dynamic_Array
-
-
 main :: proc() {
 	MyStruct :: struct {
-		v:    union #no_nil {
-			string,
-			int,
-			bool,
-		},
-		nums: []int,
+		num:      int,
+		name:     string,
+		leads_to: map[string]^MyStruct,
 	}
-	print(random([3]MyStruct))
-
+	val := random(MyStruct)
+	print(val)
+	drop(&val)
 	// MyStruct :: struct {
 	// 	f: f32,
 	// 	i: int,

@@ -142,16 +142,15 @@ _drop_allocations_inplace :: proc(
 					runtime.map_cell_index_dynamic(vs, map_info.vs, bucket_index),
 				)
 				if !key_ty_is_copy {
-					print("drop key allocation:", any{key_place, key_ty.id})
+					// print("drop key allocation:", any{key_place, key_ty.id})
 					_drop_allocations_inplace(key_ty, key_place, allocator, true)
 				}
 				if !value_ty_is_copy {
-					print("drop value allocation:", any{value_place, value_ty.id})
+					// print("drop value allocation:", any{value_place, value_ty.id})
 					_drop_allocations_inplace(value_ty, value_place, allocator, true)
 				}
 			}
 		}
-		print("Free map")
 		err := runtime.map_free_dynamic(raw_map, map_info)
 		assert(err == .None)
 		return

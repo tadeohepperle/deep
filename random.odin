@@ -6,19 +6,25 @@ import "core:mem"
 import "core:strings"
 
 RandomOptions :: struct {
+	// controls the max depth of the nested object tree, to avoid infinite trees
 	max_depth:             int,
-	max_slice_len:         int,
-	max_map_len:           int,
+	// the maximum value for random integers generated
 	max_int:               int,
+	// maximum length of slices and dynamic arrays in the data
+	max_slice_len:         int,
+	// maximum length of hashmaps in the data
+	max_map_len:           int,
+	// if true, there is a 50% chance that string values will be static strings from RANDOM_STRINGS instead of copying them into the allocator
 	sometimes_static_ptrs: bool,
-	sometimes_nil_ptrs:    bool, // for objects stored as pointers in e.g. a struct
+	// if true, allow pointer fields like in  My :: { next: ^My, v: int } to be left nil. if false, a value is always constructed with can clash with max_depth 
+	sometimes_nil_ptrs:    bool,
 }
 RANDOM_OPTIONS_DEFAULT :: RandomOptions {
-	max_depth             = 3,
+	max_depth             = 5,
 	max_int               = 100,
-	sometimes_static_ptrs = false,
-	max_map_len           = 3,
 	max_slice_len         = 5,
+	max_map_len           = 5,
+	sometimes_static_ptrs = false,
 	sometimes_nil_ptrs    = true,
 }
 random :: proc(
@@ -31,23 +37,22 @@ random :: proc(
 ) {
 	state := rand.create(seed)
 	context.random_generator = rand.default_random_generator(&state)
-	_construct_any_random(type_info_of(T), &res, options, allocator)
+	_construct_any_random(type_info_of(T), &res, options, allocator, 0)
 	return res
 }
-
-r_bool :: proc() -> bool {
+_r_bool :: proc() -> bool {
 	return rand.float32() > 0.5
 }
-
 _construct_any_random :: proc(
 	ty: Type_Info,
 	place: rawptr,
 	options: RandomOptions,
 	allocator: Allocator,
+	depth: int,
 ) {
 	switch var in ty.variant {
 	case runtime.Type_Info_Named:
-		_construct_any_random(type_info_base(ty), place, options, allocator)
+		_construct_any_random(type_info_base(ty), place, options, allocator, depth)
 		return
 	case runtime.Type_Info_Integer:
 		int_any := any{place, ty.id}
@@ -121,36 +126,44 @@ _construct_any_random :: proc(
 		str := rand.choice(RANDOM_STRINGS)
 		if var.is_cstring {
 			cstr := strings.unsafe_string_to_cstring(str)
-			if !options.sometimes_static_ptrs || r_bool() {
+			if !options.sometimes_static_ptrs || _r_bool() {
 				cstr = strings.clone_to_cstring(str, allocator)
 			}
 			(cast(^cstring)place)^ = cstr
 		} else {
-			if !options.sometimes_static_ptrs || r_bool() {
+			if !options.sometimes_static_ptrs || _r_bool() {
 				str = strings.clone(str, allocator)
 			}
 			(cast(^string)place)^ = str
 		}
 		return
 	case runtime.Type_Info_Boolean:
-		(cast(^bool)place)^ = r_bool()
+		(cast(^bool)place)^ = _r_bool()
 		return
 	case runtime.Type_Info_Any:
 		raw_any := cast(^runtime.Raw_Any)place
 		elem_ty := type_info_of(raw_any.id)
-		_construct_any_random(elem_ty, raw_any.data, options, allocator)
+		_construct_any_random(elem_ty, raw_any.data, options, allocator, depth)
 		return
 	case runtime.Type_Info_Type_Id:
 		(cast(^typeid)place)^ = typeid_of(bool) // not random, but should be a rare case anyway
 		return
 	case runtime.Type_Info_Pointer:
-		if options.sometimes_nil_ptrs && r_bool() {
-			(cast(^rawptr)place)^ = nil
-			return
+		depth_too_deep := depth >= options.max_depth
+		if options.sometimes_nil_ptrs {
+			if _r_bool() || depth_too_deep {
+				(cast(^rawptr)place)^ = nil
+				return
+			}
+		} else {
+			assert(
+				!depth_too_deep,
+				"depth >= options.max_depth, but options.sometimes_nil_ptrs = false, please set it to true to allow for nil ptrs at a certain depth",
+			)
 		}
 		ptr, err := mem.alloc(var.elem.size, var.elem.align, allocator)
 		(cast(^rawptr)place)^ = ptr
-		_construct_any_random(var.elem, ptr, options, allocator)
+		_construct_any_random(var.elem, ptr, options, allocator, depth + 1)
 		return
 	case runtime.Type_Info_Multi_Pointer:
 		if options.sometimes_nil_ptrs {
@@ -169,7 +182,7 @@ _construct_any_random :: proc(
 	case runtime.Type_Info_Array:
 		for idx in 0 ..< var.count {
 			elem_place := rawptr(uintptr(place) + uintptr(idx * var.elem_size))
-			_construct_any_random(var.elem, elem_place, options, allocator)
+			_construct_any_random(var.elem, elem_place, options, allocator, depth)
 		}
 		return
 	case runtime.Type_Info_Enumerated_Array:
@@ -181,30 +194,30 @@ _construct_any_random :: proc(
 				idx := int(val - var.min_value)
 				assert(idx >= 0 && idx < var.count)
 				elem_place := rawptr(uintptr(place) + uintptr(idx * var.elem_size))
-				_construct_any_random(var.elem, elem_place, options, allocator)
+				_construct_any_random(var.elem, elem_place, options, allocator, depth)
 			}
 		} else {
 			for idx in 0 ..< var.count {
 				elem_place := rawptr(uintptr(place) + uintptr(idx * var.elem_size))
-				_construct_any_random(var.elem, elem_place, options, allocator)
+				_construct_any_random(var.elem, elem_place, options, allocator, depth)
 			}
 		}
 		return
 	case runtime.Type_Info_Dynamic_Array:
 		raw_arr := cast(^Raw_Dynamic_Array)place
 		// we can just cast the array to a slice because the first 2 fields (data: rawptr, len: int) are the same:
-		_construct_random_slice(cast(^Raw_Slice)raw_arr, var.elem, options, allocator)
+		_construct_random_slice(cast(^Raw_Slice)raw_arr, var.elem, options, allocator, depth)
 		raw_arr.cap = raw_arr.len
 		raw_arr.allocator = allocator
 		return
 	case runtime.Type_Info_Slice:
 		raw_slice := cast(^Raw_Slice)place
-		_construct_random_slice(raw_slice, var.elem, options, allocator)
+		_construct_random_slice(raw_slice, var.elem, options, allocator, depth)
 		return
 	case runtime.Type_Info_Struct:
 		for f_idx in 0 ..< var.field_count {
 			field_place := rawptr(uintptr(place) + var.offsets[f_idx])
-			_construct_any_random(var.types[f_idx], field_place, options, allocator)
+			_construct_any_random(var.types[f_idx], field_place, options, allocator, depth)
 		}
 		return
 	case runtime.Type_Info_Union:
@@ -215,11 +228,11 @@ _construct_any_random :: proc(
 			case runtime.Type_Info_Pointer,
 			     runtime.Type_Info_Multi_Pointer,
 			     runtime.Type_Info_Procedure:
-				_construct_any_random(only_ty, place, options, allocator)
+				_construct_any_random(only_ty, place, options, allocator, depth + 1)
 				return
 			case runtime.Type_Info_String:
 				if v.is_cstring {
-					_construct_any_random(only_ty, place, options, allocator)
+					_construct_any_random(only_ty, place, options, allocator, depth)
 					return
 				}
 			}
@@ -249,7 +262,7 @@ _construct_any_random :: proc(
 			unimplemented(tprint("unsupported tag:", var.tag_type.id, "for", ty))
 		}
 		variant_ty := var.variants[variant_idx]
-		_construct_any_random(variant_ty, place, options, allocator)
+		_construct_any_random(variant_ty, place, options, allocator, depth)
 		return
 	case runtime.Type_Info_Enum:
 		// could be optimized for contiguous enums where len(E) == cap(E), so no holes
@@ -283,6 +296,42 @@ _construct_any_random :: proc(
 		}
 		return
 	case runtime.Type_Info_Map:
+		map_info := var.map_info
+		assert(map_info != nil)
+		raw_map := cast(^Raw_Map)place
+		assert(raw_map.data == 0)
+		assert(runtime.map_len(raw_map^) == 0)
+		assert(runtime.map_cap(raw_map^) == 0)
+
+		map_len := rand.int_max(options.max_map_len + 1)
+		if map_len == 0 || depth >= options.max_depth {
+			return
+		}
+		key_ty := var.key
+		value_ty := var.value
+		// we need a bit of scratchspace to construct random keys before they are inserted into the map:
+		key_scratch, err := mem.alloc(key_ty.size, key_ty.align, context.temp_allocator)
+		assert(err == .None)
+		value_scratch, err2 := mem.alloc(value_ty.size, key_ty.align, context.temp_allocator)
+		assert(err2 == .None)
+		for _ in 0 ..< map_len {
+			_construct_any_random(key_ty, key_scratch, options, allocator, depth + 1)
+			hash := map_info.key_hasher(key_scratch, runtime.map_seed(raw_map^))
+			// check if this key is already contained in map:
+			found := runtime.__dynamic_map_get(raw_map, map_info, hash, key_scratch)
+			if found != nil {
+				// something with the same hash exists already, so drop this key and go to next loop iteration:
+				_drop_allocations_inplace(key_ty, key_scratch, allocator, false)
+			} else {
+				// get the place back and construct the 
+				_construct_any_random(value_ty, value_scratch, options, allocator, depth + 1)
+				runtime.__dynamic_map_set(raw_map, map_info, hash, key_scratch, value_scratch)
+			}
+		}
+		mem.free(key_scratch, context.temp_allocator)
+		mem.free(value_scratch, context.temp_allocator)
+
+		return
 	case runtime.Type_Info_Parameters:
 		unimplemented("cannot generate random Type_Info_Parameters")
 	case runtime.Type_Info_Soa_Pointer:
@@ -290,15 +339,15 @@ _construct_any_random :: proc(
 	}
 	panic("should have covered all types at the end of _construct_any_random")
 }
-
 _construct_random_slice :: proc(
 	raw_slice: ^Raw_Slice,
 	elem_ty: Type_Info,
 	options: RandomOptions,
 	allocator: Allocator,
+	depth: int,
 ) {
 	slice_len := rand.int_max(options.max_slice_len + 1)
-	if slice_len == 0 {
+	if slice_len == 0 || depth >= options.max_depth {
 		raw_slice^ = Raw_Slice{nil, 0}
 		return
 	}
@@ -308,7 +357,7 @@ _construct_random_slice :: proc(
 	assert(err == .None)
 	for idx in 0 ..< slice_len {
 		elem_place := rawptr(uintptr(raw_slice.data) + uintptr(idx * elem_ty.size))
-		_construct_any_random(elem_ty, elem_place, options, allocator)
+		_construct_any_random(elem_ty, elem_place, options, allocator, depth + 1)
 	}
 }
 
@@ -326,4 +375,7 @@ RANDOM_STRINGS := []string {
 	"Candle",
 	"Jon Snow",
 	"Crazy Frog",
+	"Hanoi",
+	"Lazy Fox",
+	"Craneberry Juice",
 }
