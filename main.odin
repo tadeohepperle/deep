@@ -19,33 +19,65 @@ Raw_Map :: runtime.Raw_Map
 Raw_Dynamic_Array :: runtime.Raw_Dynamic_Array
 main :: proc() {
 
-	MyStruct :: struct {
-		v:        int,
-		name:     string,
-		nums:     []int,
-		contacts: map[string]int,
+	Ex :: struct {
+		a:   string,
+		b:   B,
+		num: int,
 	}
-	a := MyStruct {
-		v    = 3,
-		name = "Tadeo",
-		nums = {33, 44, 55},
+	B :: struct {
+		name: string,
+		nums: [3]int,
+		arr:  [dynamic]string,
+		arr2: [dynamic]int,
+		arr3: []int,
+		m:    map[int][3]f32,
 	}
-	a.contacts["Ju"] = 8888
-	a.contacts["Foo Bar"] = 9999
-	buf := encode(a)
-	print(buf)
+	if true {
+		schema, err := type_to_schema(type_info_of(Ex))
+		if err != nil {
+			print(err)
+		} else {
+			for ty, idx in schema.registry {
+				print(idx, ": ", ty)
+			}
 
-	remove_range(&buf, 57, 60)
-	validate_err := validate_encoding(MyStruct, buf[:])
-	print("validate err:", validate_err)
-
-
-	b, err := decode(MyStruct, buf[:])
-	if err != .None {
-		print("Error:", err)
-	} else {
-		print("Success: ", b)
+		}
+		return
 	}
+	// A :: struct {
+	// 	p: ^B,
+	// }
+	// B :: struct {
+	// 	p: ^A,
+	// }
+	// MyStruct :: struct {
+	// 	m:        ^MyStruct,
+	// 	v:        int,
+	// 	name:     string,
+	// 	nums:     []int,
+	// 	contacts: map[string]int,
+	// }
+	// a := MyStruct {
+	// 	v    = 3,
+	// 	name = "Tadeo",
+	// 	nums = {33, 44, 55},
+	// }
+	// a.contacts["Ju"] = 8888
+	// a.contacts["Foo Bar"] = 9999
+	// buf := encode(a)
+	// print(buf)
+
+	// remove_range(&buf, 57, 60)
+	// validate_err := validate_encoding(MyStruct, buf[:])
+	// print("validate err:", validate_err)
+
+
+	// b, err := decode(MyStruct, buf[:])
+	// if err != .None {
+	// 	print("Error:", err)
+	// } else {
+	// 	print("Success: ", b)
+	// }
 	// MyStruct :: struct {
 	// 	num:      int,
 	// 	name:     string,

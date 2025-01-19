@@ -4,7 +4,6 @@ import "base:intrinsics"
 import "base:runtime"
 import "core:mem"
 
-
 encode :: proc(this: $T, allocator := context.allocator) -> (buf: [dynamic]u8) {
 	buf = make([dynamic]u8, len = 0, cap = size_of(T), allocator = allocator)
 	encode_to(this, &buf)
@@ -317,15 +316,11 @@ decode :: proc(
 	res: T,
 	err: DecodeError,
 ) {
-	// todo! right now if any error occurs, all the stuff decoded until that point
-	// is leaked, which is stupid. Instead, we should probably keep track of all allocations that were made and 
-	// free them at the end if there is any error.
-	// A custom allocator for this WILL NOT work, because the allocator passed in here
-	// is saved in the constructed maps and dynamic arrays
-	ctx := _make_ctx(buf, allocator)
-	err = _decode_any(type_info_of(T), &res, &ctx, false)
+	cursor := buf
+	tracker := tracker_create(allocator)
+	err = _decode_any(type_info_of(T), &res, &cursor, &tracker, false)
 	if err != .None {
-		_ctx_free_all_tracked(&ctx)
+		tracker_free_all(&tracker)
 	}
 	return res, err
 }
@@ -463,57 +458,31 @@ _validate_seq :: proc(elem_ty: Type_Info, cursor: Cursor) -> (err: DecodeError) 
 	}
 	return .None
 }
-_TrackedAlloc :: struct {
-	ptr:  rawptr,
-	size: int,
-}
-_DecodingCtx :: struct {
-	cursor:              []u8,
-	allocator:           Allocator,
-	tracked_allocations: [dynamic]_TrackedAlloc,
-}
-_make_ctx :: proc(buf: []u8, allocator: Allocator) -> _DecodingCtx {
-	return _DecodingCtx {
-		cursor = buf,
-		allocator = allocator,
-		tracked_allocations = make([dynamic]_TrackedAlloc, allocator = context.temp_allocator),
-	}
-}
-_ctx_alloc :: proc(ctx: ^_DecodingCtx, size: int, align: int) -> rawptr {
-	ptr, err := mem.alloc(size, align, ctx.allocator)
-	assert(err == .None)
-	assert(ptr != nil)
-	append(&ctx.tracked_allocations, _TrackedAlloc{ptr, size})
-	return ptr
-}
-_ctx_free_all_tracked :: proc(ctx: ^_DecodingCtx) {
-	for a in ctx.tracked_allocations {
-		mem.free_with_size(a.ptr, a.size, ctx.allocator)
-	}
-}
-// the `tracked` arg is for tracking all allocations that happen to deallocate them in the error case.
+
+// the `tracker` arg is for tracking all allocations that happen to deallocate them in the error case.
 _decode_any :: proc(
 	ty: Type_Info,
 	place: rawptr,
-	ctx: ^_DecodingCtx,
+	cursor: ^[]u8,
+	tracker: ^Tracker,
 	$ASSERT_NON_COPY_TYPE: bool,
 ) -> (
 	err: DecodeError,
 ) {
 	when !ASSERT_NON_COPY_TYPE {
 		if is_copy_type(ty) {
-			return _read(place, ty.size, &ctx.cursor)
+			return _read(place, ty.size, cursor)
 		}
 	}
 	#partial switch var in ty.variant {
 	case runtime.Type_Info_Named:
-		return _decode_any(type_info_base(ty), place, ctx, true)
+		return _decode_any(type_info_base(ty), place, cursor, tracker, true)
 	case runtime.Type_Info_Pointer:
-		is_nil := _read_ptr_marker(&ctx.cursor) or_return
+		is_nil := _read_ptr_marker(cursor) or_return
 		ptr_place := cast(^rawptr)place
 		if !is_nil {
-			ptr := _ctx_alloc(ctx, var.elem.size, var.elem.align)
-			_decode_any(var.elem, ptr, ctx, false) or_return
+			ptr := tracker_alloc(tracker, var.elem.size, var.elem.align)
+			_decode_any(var.elem, ptr, cursor, tracker, false) or_return
 			ptr_place^ = ptr
 		} else {
 			ptr_place^ = nil
@@ -521,21 +490,21 @@ _decode_any :: proc(
 		return .None
 	case runtime.Type_Info_Slice:
 		raw_slice := cast(^Raw_Slice)place
-		raw_slice^ = _decode_seq(var.elem, ctx) or_return
+		raw_slice^ = _decode_seq(var.elem, cursor, tracker) or_return
 		return .None
 	case runtime.Type_Info_Dynamic_Array:
 		raw_arr := cast(^Raw_Dynamic_Array)place
-		raw_slice := _decode_seq(var.elem, ctx) or_return
+		raw_slice := _decode_seq(var.elem, cursor, tracker) or_return
 		raw_arr.data = raw_slice.data
 		raw_arr.len = raw_slice.len
 		raw_arr.cap = raw_slice.len
-		raw_arr.allocator = ctx.allocator
+		raw_arr.allocator = tracker.allocator
 		return .None
 	case runtime.Type_Info_Array:
 		// if we get here, we already know it is not an array of copy types, clone all values inplace:
 		for idx in 0 ..< var.count {
 			elem_place := rawptr(uintptr(place) + uintptr(idx * var.elem_size))
-			_decode_any(var.elem, elem_place, ctx, true) or_return
+			_decode_any(var.elem, elem_place, cursor, tracker, true) or_return
 		}
 		return .None
 	case runtime.Type_Info_Enumerated_Array:
@@ -548,17 +517,17 @@ _decode_any :: proc(
 				assert(idx >= 0 && int(idx) < var.count)
 				offset := uintptr(idx) * uintptr(var.elem_size)
 				elem_place := rawptr(uintptr(place) + offset)
-				_decode_any(var.elem, elem_place, ctx, true) or_return
+				_decode_any(var.elem, elem_place, cursor, tracker, true) or_return
 			}
 		} else {
 			for idx in 0 ..< var.count {
 				elem_place := rawptr(uintptr(place) + uintptr(idx * var.elem_size))
-				_decode_any(var.elem, elem_place, ctx, true) or_return
+				_decode_any(var.elem, elem_place, cursor, tracker, true) or_return
 			}
 		}
 		return .None
 	case runtime.Type_Info_String:
-		n := _read_len(&ctx.cursor) or_return
+		n := _read_len(cursor) or_return
 		if n == 0 {
 			if var.is_cstring {
 				(cast(^cstring)place)^ = nil
@@ -568,8 +537,8 @@ _decode_any :: proc(
 			return .None
 		}
 
-		ptr := _ctx_alloc(ctx, n, 1)
-		_read(ptr, n, &ctx.cursor) or_return
+		ptr := tracker_alloc(tracker, n, 1)
+		_read(ptr, n, cursor) or_return
 
 		if var.is_cstring {
 			(cast(^rawptr)place)^ = ptr
@@ -580,7 +549,7 @@ _decode_any :: proc(
 	case runtime.Type_Info_Struct:
 		for f_idx in 0 ..< var.field_count {
 			field_place := rawptr(uintptr(place) + var.offsets[f_idx])
-			_decode_any(var.types[f_idx], field_place, ctx, false) or_return
+			_decode_any(var.types[f_idx], field_place, cursor, tracker, false) or_return
 		}
 		return .None
 	case runtime.Type_Info_Union:
@@ -589,21 +558,21 @@ _decode_any :: proc(
 			only_ty := var.variants[0]
 			#partial switch v in var.variants[0].variant {
 			case runtime.Type_Info_Pointer:
-				return _decode_any(only_ty, place, ctx, true)
+				return _decode_any(only_ty, place, cursor, tracker, true)
 			case runtime.Type_Info_Multi_Pointer:
 				unimplemented("multi pointers cannot be encoded/decoded!")
 			case runtime.Type_Info_Procedure:
 				unimplemented("procedure pointers cannot be encoded/decoded!")
 			case runtime.Type_Info_String:
 				if v.is_cstring {
-					return _decode_any(only_ty, place, ctx, true)
+					return _decode_any(only_ty, place, cursor, tracker, true)
 				}
 			}
 		}
 
 
 		// read tag, then based on that read data
-		tag := _read_len(&ctx.cursor) or_return
+		tag := _read_len(cursor) or_return
 		if !var.no_nil && tag == 0 {
 			// this means the union was nil
 			mem.zero(place, ty.size)
@@ -615,15 +584,15 @@ _decode_any :: proc(
 			return .InvalidUnionTag
 		}
 		variant_ty := var.variants[variant_idx]
-		return _decode_any(variant_ty, place, ctx, false)
+		return _decode_any(variant_ty, place, cursor, tracker, false)
 	case runtime.Type_Info_Map:
-		_read_marker(.MapStart, &ctx.cursor) or_return
-		n := _read_len(&ctx.cursor) or_return
+		_read_marker(.MapStart, cursor) or_return
+		n := _read_len(cursor) or_return
 		raw_map := cast(^Raw_Map)place
 		raw_map^ = Raw_Map {
 			data      = 0,
 			len       = 0,
-			allocator = ctx.allocator,
+			allocator = tracker.allocator,
 		}
 		if n == 0 {
 			return .None
@@ -645,19 +614,21 @@ _decode_any :: proc(
 		defer {
 			mem.free(key_scratch, context.temp_allocator)
 			mem.free(value_scratch, context.temp_allocator)
+			// such that the map gets deallocated if any error occurs later:
+			tracker_add(tracker, rawptr(raw_map.data), runtime.map_cap(raw_map^))
 		}
 		for _ in 0 ..< n {
-			_read_marker(.MapKeyStart, &ctx.cursor) or_return
+			_read_marker(.MapKeyStart, cursor) or_return
 			if key_ty_is_copy {
-				_read(key_scratch, key_ty.size, &ctx.cursor) or_return
+				_read(key_scratch, key_ty.size, cursor) or_return
 			} else {
-				_decode_any(key_ty, key_scratch, ctx, true) or_return
+				_decode_any(key_ty, key_scratch, cursor, tracker, true) or_return
 			}
-			_read_marker(.MapValStart, &ctx.cursor) or_return
+			_read_marker(.MapValStart, cursor) or_return
 			if value_ty_is_copy {
-				_read(value_scratch, value_ty.size, &ctx.cursor) or_return
+				_read(value_scratch, value_ty.size, cursor) or_return
 			} else {
-				_decode_any(value_ty, value_scratch, ctx, true) or_return
+				_decode_any(value_ty, value_scratch, cursor, tracker, true) or_return
 			}
 			// calculate hash and insert key and value into map
 			hash := map_info.key_hasher(key_scratch, runtime.map_seed(raw_map^))
@@ -671,26 +642,28 @@ _decode_any :: proc(
 	}
 	return .UnsupportedType
 }
+
 _decode_seq :: proc(
 	elem_ty: Type_Info,
-	ctx: ^_DecodingCtx,
+	cursor: ^[]u8,
+	tracker: ^Tracker,
 ) -> (
 	raw_slice: Raw_Slice,
 	err: DecodeError,
 ) {
-	_read_marker(.SeqStart, &ctx.cursor) or_return
-	n := _read_len(&ctx.cursor) or_return
+	_read_marker(.SeqStart, cursor) or_return
+	n := _read_len(cursor) or_return
 	if n == 0 {
 		return Raw_Slice{nil, 0}, .None
 	}
-	ptr := _ctx_alloc(ctx, elem_ty.size * n, elem_ty.align)
+	ptr := tracker_alloc(tracker, elem_ty.size * n, elem_ty.align)
 	if is_copy_type(elem_ty) {
-		_read(ptr, n * elem_ty.size, &ctx.cursor) or_return
+		_read(ptr, n * elem_ty.size, cursor) or_return
 	} else {
 		u_ptr := uintptr(ptr)
 		for idx in 0 ..< n {
 			elem_place := rawptr(u_ptr + uintptr(idx * elem_ty.size))
-			_decode_any(elem_ty, elem_place, ctx, true) or_return
+			_decode_any(elem_ty, elem_place, cursor, tracker, true) or_return
 		}
 	}
 	return Raw_Slice{ptr, n}, .None

@@ -1,0 +1,96 @@
+// how to do schemaful encoding?
+
+
+The schema describes how the bytes are parsed
+
+parse_schema :: (old_schema, new_schema, bytes, place) -> Err {
+
+
+
+
+
+}
+
+example:
+
+{ i: int, j: string, f: float } -> {f: float, i: int}
+
+parse int    to place + 8
+skip  string
+parse float  to place + 0
+
+
+{f: float, i: int} -> { i: int, j: string, f: float }
+parse float to place + 24
+parse int to place + 0
+// leave string as is, is zero initialized anyway
+
+other example:
+
+
+{ j: string, i : int } -> union{ int, string }
+// no match, leave union as zero
+int -> union{ int, string }
+parse int  to place 0
+set   tag  at place 0 + 8   to  1
+
+union{ int, string, float, Foo }  -> union {float, int}
+parse tag:
+    if tag == 1:
+        parse int to place
+        set tag 2
+    if tag == 3:
+        parse float to place
+        set tag 1
+
+union{ int, string, float, Foo } -> int 
+parse tag:
+    if tag == 1:
+        parse int to place
+        // no set tag!!!
+
+So first create schemas for both types, encode with schemaA, keep schemaB for decoding
+
+encoding:
+    write schemaA, write data
+
+decoding:
+    compute decoding schema from diff(schemaA, schemaB)
+    -> use decoding schema to write to schemaB
+
+// supported types:
+
+all simple types,
+array,
+
+
+DecodePoint :: 
+    non_match : bool -> skip completely
+    DecodeArray
+
+
+// How to represent the schema (as a flat structure)
+
+
+Type :: {
+    size:   int
+    align:  int
+    simple: bool
+    hash:   int
+    kind:   TypeVariant
+}
+
+TypeVariant ::
+
+give them new type ids, to encode them better:
+
+TypeRegistry :: [Type]
+
+encode_type_registry :: [Type] -> [u8]
+
+len_types: 
+
+byte encoding:
+len_types, [Type,Type,Type,Type,Type,...,EncodedType],data
+
+// do we need to decode the types into temp alloc? Probably yes.
