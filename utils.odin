@@ -42,3 +42,14 @@ tracker_clone_string :: proc(tracker: ^Tracker, s: string) -> string {
 	append(&tracker.tracked, Alloc{raw_data(cloned), len(s)})
 	return cloned
 }
+
+hash_string :: proc "contextless" (h: ^u64, s: string) {
+	h^ = hash.fnv64(transmute([]u8)s, seed = h^)
+}
+hash_data :: proc "contextless" (h: ^u64, t: $T) {
+	t := t
+	h^ = hash.fnv64(transmute([]u8)Raw_Slice{&t, size_of(T)}, seed = h^)
+}
+hash_slice :: proc "contextless" (h: ^u64, slice: []$T) {
+	h^ = hash.fnv64(transmute([]u8)Raw_Slice{raw_data(slice), len(slice) * size_of(T)}, seed = h^)
+}

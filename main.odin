@@ -20,6 +20,10 @@ Raw_Dynamic_Array :: runtime.Raw_Dynamic_Array
 main :: proc() {
 
 	Ex :: struct {
+		x:   u8,
+		y:   i16,
+		z:   i32,
+		q:   u64,
 		a:   string,
 		b:   B,
 		num: int,
@@ -37,7 +41,7 @@ main :: proc() {
 		if err != nil {
 			print(err)
 		} else {
-			for ty, idx in schema.registry {
+			for ty, idx in schema {
 				print(idx, ": ", ty)
 			}
 
