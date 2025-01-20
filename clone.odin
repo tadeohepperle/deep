@@ -82,6 +82,7 @@ _clone_allocations_inplace :: proc(
 				_clone_allocations_inplace(var.elem, elem_place, allocator, true)
 			}
 		}
+		return
 	case runtime.Type_Info_String:
 		if var.is_cstring {
 			place_ptr := cast(^rawptr)place

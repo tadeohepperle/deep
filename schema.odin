@@ -5,6 +5,12 @@ import "base:runtime"
 import "core:hash"
 import "core:mem"
 
+// SCHEMAFUL ENCODING, CURRENTLY WIP!
+
+// encode_schema_to :: proc(schema: Schema, buf: ^[dynamic]u8) {
+// 	_write_len(len(schema), buf)
+// }
+
 Schema :: []Type
 TypeHeader :: struct {
 	size:    int,

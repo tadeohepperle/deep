@@ -81,7 +81,6 @@ _encode_any_to :: proc(
 		} else {
 			raw_str = (cast(^Raw_String)place)^
 		}
-		print("write string", raw_str.len)
 		_write_len(raw_str.len, buf)
 		_write(raw_str.data, raw_str.len, buf)
 		return
@@ -118,9 +117,6 @@ _encode_any_to :: proc(
 		return
 	case runtime.Type_Info_Map:
 		raw_map: Raw_Map = (cast(^Raw_Map)place)^
-		if raw_map.data == 0 {
-			return
-		}
 
 		map_info := var.map_info
 		assert(map_info != nil)
@@ -129,7 +125,7 @@ _encode_any_to :: proc(
 
 		_write_marker(.MapStart, buf)
 		_write_len(map_len, buf)
-		if map_len == 0 {
+		if map_len == 0 || raw_map.data == 0 {
 			return
 		}
 

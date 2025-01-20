@@ -24,7 +24,12 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 		base_ty := type_info_base(ty)
 		return _any_eq(base_ty, a, b, true)
 	case runtime.Type_Info_Pointer:
-		return _any_eq(var.elem, (cast(^rawptr)a)^, (cast(^rawptr)b)^, false)
+		a_elem_place := (cast(^rawptr)a)^
+		b_elem_place := (cast(^rawptr)b)^
+		if a_elem_place == nil || b_elem_place == nil {
+			return a_elem_place == b_elem_place // so true if nil,nil    false otherwise
+		}
+		return _any_eq(var.elem, a_elem_place, b_elem_place, false)
 	case runtime.Type_Info_Slice:
 		a_slice := cast(^Raw_Slice)a
 		b_slice := cast(^Raw_Slice)b
@@ -126,14 +131,12 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 		if a_map_len == 0 {
 			return true
 		}
-
 		key_ty := var.key
 		value_ty := var.value
 		key_ty_is_copy := is_copy_type(key_ty)
 		value_ty_is_copy := is_copy_type(value_ty)
 		map_info := var.map_info
 		assert(map_info != nil)
-
 		// iterate over entries of a, one by one and look them up in b to compare
 		ks, vs, hs, _, _ := runtime.map_kvh_data_dynamic(a_map, map_info)
 		for bucket_index in 0 ..< uintptr(runtime.map_cap(a_map)) {
@@ -148,6 +151,11 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 				b_hash,
 				a_key,
 			)
+			if b_key == nil || b_value == nil {
+				// return false if lookup failed
+				return false
+			}
+			assert(a_key != nil && a_value != nil) // slots should be valid
 			if key_ty_is_copy {
 				if runtime.memory_compare(a_key, b_key, key_ty.size) != 0 {
 					return false
