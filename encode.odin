@@ -73,16 +73,14 @@ _encode_any_to :: proc(
 		}
 		return
 	case runtime.Type_Info_String:
-		raw_str: Raw_String = ---
+		str: string
 		if var.is_cstring {
 			// this is O(n) operation searching for the null terminator:
-			str := string((cast(^cstring)place)^)
-			raw_str = transmute(Raw_String)str
+			str = string((cast(^cstring)place)^)
 		} else {
-			raw_str = (cast(^Raw_String)place)^
+			str = (cast(^string)place)^
 		}
-		_write_len(raw_str.len, buf)
-		_write(raw_str.data, raw_str.len, buf)
+		_write_string(str, buf)
 		return
 	case runtime.Type_Info_Struct:
 		// todo: allow for ignoring fields here.
@@ -185,6 +183,7 @@ Marker :: enum u8 {
 	NilPtr,
 	MapKeyStart,
 	MapValStart,
+	TypeStart,
 }
 MarkerBytes :: [4]u8
 
@@ -196,6 +195,7 @@ MARKER_BYTES := [Marker]MarkerBytes {
 	.NilPtr      = {230, 230, 230, 230},
 	.MapKeyStart = {133, 133, 133, 133},
 	.MapValStart = {134, 134, 134, 134},
+	.TypeStart   = {255, 254, 253, 252},
 }
 _write_marker :: proc(marker: Marker, buf: ^[dynamic]u8) {
 	_write(&MARKER_BYTES[marker], size_of(MarkerBytes), buf)
@@ -205,8 +205,32 @@ _write_len :: proc(i: int, buf: ^[dynamic]u8) {
 	i := i
 	_write(&i, size_of(int), buf)
 }
+_write_string :: proc(s: string, buf: ^[dynamic]u8) {
+	assert(len(s) < int(max(u32)))
+	s_len_u32 := u32(len(s))
+	_write(&s_len_u32, 4, buf)
+	_write(raw_data(s), len(s), buf)
+}
+_write_nothing :: proc(n_bytes: int, buf: ^[dynamic]u8) {
+	raw := cast(^Raw_Dynamic_Array)buf
+	_buffer_grow(raw, n_bytes)
+}
+_write_data :: #force_inline proc(from: ^$T, buf: ^[dynamic]u8) {
+	_write(from, size_of(T), buf)
+}
 _write :: proc(from: rawptr, n_bytes: int, buf: ^[dynamic]u8) {
 	raw := cast(^Raw_Dynamic_Array)buf
+	write_offset := uintptr(raw.len)
+	_buffer_grow(raw, n_bytes)
+	dst := rawptr(uintptr(raw.data) + write_offset)
+	mem.copy_non_overlapping(dst, from, n_bytes)
+}
+_write_at :: proc(byte_idx: int, from: rawptr, n_bytes: int, buf: ^[dynamic]u8) {
+	assert(byte_idx + n_bytes <= len(buf))
+	dst := rawptr(uintptr(raw_data(buf^)) + uintptr(byte_idx))
+	mem.copy_non_overlapping(dst, from, n_bytes)
+}
+_buffer_grow :: proc(raw: ^Raw_Dynamic_Array, n_bytes: int) {
 	new_len := raw.len + n_bytes
 	// resize if capacity is not enough:
 	if new_len > raw.cap {
@@ -220,18 +244,16 @@ _write :: proc(from: rawptr, n_bytes: int, buf: ^[dynamic]u8) {
 		raw.data = new_data
 		raw.cap = new_cap
 	}
-	dst := rawptr(uintptr(raw.data) + uintptr(raw.len))
-	mem.copy_non_overlapping(dst, from, n_bytes)
 	raw.len = new_len
 }
-_read_marker :: proc(marker: Marker, cursor: Cursor) -> DecodeError {
+_read_marker :: proc(expected_marker: Marker, cursor: Cursor) -> DecodeError {
 	if len(cursor) < size_of(MarkerBytes) {
 		return .NotEnoughBytes
 	}
-	expected := MARKER_BYTES[marker]
+	expected := MARKER_BYTES[expected_marker]
 	got := (cast(^MarkerBytes)raw_data(cursor^))^
 	if got != expected {
-		switch marker {
+		switch expected_marker {
 		case .SeqStart:
 			return .Marker_SeqStart_Missing
 		case .MapStart:
@@ -240,8 +262,10 @@ _read_marker :: proc(marker: Marker, cursor: Cursor) -> DecodeError {
 			return .Marker_MapKeyStart_Missing
 		case .MapValStart:
 			return .Marker_MapValStart_Missing
+		case .TypeStart:
+			return .Marker_TypeStart_Missing
 		case .NilPtr, .NonNilPtr:
-			panic("use _read_ptr_marker instead")
+			panic("Dont call _read_marker with .NilPtr, .NonNilPtr, use _read_ptr_marker")
 		}
 	}
 	cursor^ = cursor[size_of(MarkerBytes):]
@@ -273,6 +297,22 @@ _read_len :: proc(cursor: Cursor) -> (i: int, err: DecodeError) {
 	cursor^ = cursor[size_of(int):]
 	return i, .None
 }
+// not that the string points to bytes directly in the buffer
+_read_string :: proc(cursor: Cursor) -> (s: string, err: DecodeError) {
+	if len(cursor) < 4 {
+		return "", .NotEnoughBytes
+	}
+	s_len_u32 := (cast(^u32)raw_data(cursor^))^
+	s_len := int(s_len_u32)
+	s_bytes_total := 4 + s_len
+	if len(cursor) < s_bytes_total {
+		return "", .NotEnoughBytes
+	}
+	s = transmute(string)Raw_String{&cursor[4], s_len}
+	cursor^ = cursor[s_bytes_total:]
+	return s, .None
+
+}
 _read :: proc(to: rawptr, n_bytes: int, cursor: Cursor) -> DecodeError {
 	if n_bytes > len(cursor) {
 		return .NotEnoughBytes
@@ -281,7 +321,16 @@ _read :: proc(to: rawptr, n_bytes: int, cursor: Cursor) -> DecodeError {
 	cursor^ = cursor[n_bytes:] // skip over read bytes
 	return .None
 }
-_read_no_copy :: #force_inline proc(n_bytes: int, cursor: Cursor) -> DecodeError {
+_read_data :: proc($T: typeid, cursor: Cursor) -> (res: T, err: DecodeError) {
+	T_SIZE :: size_of(T)
+	if T_SIZE > len(cursor) {
+		return {}, .NotEnoughBytes
+	}
+	mem.copy_non_overlapping(&res, raw_data(cursor^), T_SIZE)
+	cursor^ = cursor[T_SIZE:]
+	return res, .None
+}
+_skip_over :: #force_inline proc(n_bytes: int, cursor: Cursor) -> DecodeError {
 	if n_bytes > len(cursor) {
 		return .NotEnoughBytes
 	}
@@ -301,7 +350,20 @@ DecodeError :: enum {
 	Marker_MapKeyStart_Missing,
 	Marker_MapValStart_Missing,
 	MarkerForPtrMissing,
+	Marker_TypeStart_Missing,
 	DoubleKeyInMap,
+	InvalidSchemaTypeTag,
+	InvalidCopyPrimitiveTag,
+	InvalidNumberOfSchemaBytes,
+	SchemaIsEmpty,
+	TypeIdxTooHigh,
+	BoolByteNotZeroOrOne,
+	FieldOffsetGreaterThanStructSize,
+	UnionTagOffsetGreaterThanSize,
+	InvalidUnionTagSize,
+	UnionWithZeroVariants,
+	InvalidTypeForSchema,
+	NoTypeSimilarityBetweenOriginAndTargetSchema,
 }
 Cursor :: ^[]u8
 decode :: proc(
@@ -339,7 +401,7 @@ _validate_encoding_any :: proc(
 ) {
 	when !ASSERT_NON_COPY_TYPE {
 		if is_copy_type(ty) {
-			return _read_no_copy(ty.size, cursor)
+			return _skip_over(ty.size, cursor)
 		}
 	}
 	#partial switch var in ty.variant {
@@ -375,7 +437,7 @@ _validate_encoding_any :: proc(
 		return .None
 	case runtime.Type_Info_String:
 		n := _read_len(cursor) or_return
-		_read_no_copy(n, cursor) or_return
+		_skip_over(n, cursor) or_return
 		return .None
 	case runtime.Type_Info_Struct:
 		for f_idx in 0 ..< var.field_count {
@@ -396,7 +458,7 @@ _validate_encoding_any :: proc(
 			case runtime.Type_Info_String:
 				if v.is_cstring {
 					n := _read_len(cursor) or_return
-					_read_no_copy(n, cursor) or_return
+					_skip_over(n, cursor) or_return
 					return .None
 				}
 			}
@@ -427,13 +489,13 @@ _validate_encoding_any :: proc(
 		for _ in 0 ..< n {
 			_read_marker(.MapKeyStart, cursor) or_return
 			if key_ty_is_copy {
-				_read_no_copy(key_ty.size, cursor) or_return
+				_skip_over(key_ty.size, cursor) or_return
 			} else {
 				_validate_encoding_any(key_ty, cursor, true)
 			}
 			_read_marker(.MapValStart, cursor) or_return
 			if value_ty_is_copy {
-				_read_no_copy(value_ty.size, cursor) or_return
+				_skip_over(value_ty.size, cursor) or_return
 			} else {
 				_validate_encoding_any(value_ty, cursor, true)
 			}
@@ -446,7 +508,7 @@ _validate_seq :: proc(elem_ty: Type_Info, cursor: Cursor) -> (err: DecodeError) 
 	_read_marker(.SeqStart, cursor) or_return
 	n := _read_len(cursor) or_return
 	if is_copy_type(elem_ty) {
-		_read_no_copy(n * elem_ty.size, cursor) or_return // just advance cursor by n elements
+		_skip_over(n * elem_ty.size, cursor) or_return // just advance cursor by n elements
 	} else {
 		for _ in 0 ..< n {
 			_validate_encoding_any(elem_ty, cursor, true) or_return
@@ -459,7 +521,7 @@ _validate_seq :: proc(elem_ty: Type_Info, cursor: Cursor) -> (err: DecodeError) 
 _decode_any :: proc(
 	ty: Type_Info,
 	place: rawptr,
-	cursor: ^[]u8,
+	cursor: Cursor,
 	tracker: ^Tracker,
 	$ASSERT_NON_COPY_TYPE: bool,
 ) -> (
@@ -523,23 +585,17 @@ _decode_any :: proc(
 		}
 		return .None
 	case runtime.Type_Info_String:
-		n := _read_len(cursor) or_return
-		if n == 0 {
-			if var.is_cstring {
-				(cast(^cstring)place)^ = nil
-			} else {
-				(cast(^Raw_String)place)^ = Raw_String{nil, 0}
-			}
+		str := _read_string(cursor) or_return
+		raw_str := transmute(Raw_String)str
+		if raw_str.len == 0 {
 			return .None
 		}
-
-		ptr := tracker_alloc(tracker, n, 1)
-		_read(ptr, n, cursor) or_return
-
+		ptr := tracker_alloc(tracker, raw_str.len, 1)
+		mem.copy_non_overlapping(ptr, raw_str.data, raw_str.len)
 		if var.is_cstring {
 			(cast(^rawptr)place)^ = ptr
 		} else {
-			(cast(^Raw_String)place)^ = Raw_String{cast([^]u8)ptr, n}
+			(cast(^Raw_String)place)^ = Raw_String{cast([^]u8)ptr, raw_str.len}
 		}
 		return .None
 	case runtime.Type_Info_Struct:
@@ -605,7 +661,7 @@ _decode_any :: proc(
 		alloc_err: runtime.Allocator_Error
 		key_scratch, alloc_err = mem.alloc(key_ty.size, key_ty.align, context.temp_allocator)
 		assert(alloc_err == .None)
-		value_scratch, alloc_err = mem.alloc(value_ty.size, key_ty.align, context.temp_allocator)
+		value_scratch, alloc_err = mem.alloc(value_ty.size, value_ty.align, context.temp_allocator)
 		assert(alloc_err == .None)
 		defer {
 			mem.free(key_scratch, context.temp_allocator)

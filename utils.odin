@@ -7,6 +7,10 @@ import "core:hash"
 import "core:mem"
 import "core:strings"
 
+Error :: Maybe(string)
+
+None :: struct {}
+
 print :: fmt.println
 tprint :: fmt.tprint
 Type_Info :: ^runtime.Type_Info
@@ -49,9 +53,13 @@ tracker_add :: proc(tracker: ^Tracker, ptr: rawptr, size: int) {
 }
 
 tracker_clone_string :: proc(tracker: ^Tracker, s: string) -> string {
-	cloned := strings.clone(s, tracker.allocator)
-	append(&tracker.tracked, Alloc{raw_data(cloned), len(s)})
-	return cloned
+	if s == "" {
+		return ""
+	} else {
+		cloned := strings.clone(s, tracker.allocator)
+		append(&tracker.tracked, Alloc{raw_data(cloned), len(s)})
+		return cloned
+	}
 }
 
 hash_string :: proc "contextless" (h: ^u64, s: string) {
@@ -216,4 +224,33 @@ _set_union_tag_for_non_ptr_union :: proc(
 	case:
 		unimplemented(tprint("unsupported union tag:", union_info.tag_type.id))
 	}
+}
+
+// just like runtime.type_info_base, but also converts e.g. Maybe(^T) to ^T
+type_info_base_union_opt :: proc "contextless" (info: Type_Info) -> Type_Info {
+	base := info
+	loop: for {
+		#partial switch var in base.variant {
+		case runtime.Type_Info_Named:
+			base = var.base
+		case runtime.Type_Info_Union:
+			if len(var.variants) == 1 {
+				only_ty := var.variants[0]
+				#partial switch v in only_ty.variant {
+				case runtime.Type_Info_Pointer,
+				     runtime.Type_Info_Multi_Pointer,
+				     runtime.Type_Info_Procedure:
+					return only_ty
+				case runtime.Type_Info_String:
+					if v.is_cstring {
+						return only_ty
+					}
+				}
+			}
+			break loop
+		case:
+			break loop
+		}
+	}
+	return base
 }

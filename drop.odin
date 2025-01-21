@@ -169,5 +169,5 @@ _drop_ptr_type_allocation_inplace :: proc(
 		return
 	}
 	_drop_allocations_inplace(elem_ty, old_ptr, allocator, false)
-	free(old_ptr)
+	mem.free(old_ptr, allocator)
 }

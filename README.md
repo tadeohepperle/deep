@@ -30,26 +30,17 @@ drop(&foo_from_bytes)
 
 // all allocations freed up, no memory leaks should remain
 Foo :: struct {
-	name:         string,
-	age:          union {
-		int,
-		bool,
-		[]int,
-	},
-	tiles:        [dynamic][2]f32,
-	connected_to: map[string]^Foo,
-	dirs:         map[Dir][]int,
+    name:         string,
+    bar:          union { int, bool, []Item },
+    tiles:        [dynamic][2]f32,
+    connected_to: map[string]^Foo,
+    dirs:         map[Dir][]int,
 }
 Item :: struct {
-	abilities: map[u64][dynamic]string,
-	cost:      u64,
+    abilities: map[u64][dynamic]string,
+    cost:      u64,
 }
-Dir :: enum {
-	North,
-	South,
-	West,
-	East,
-}
+Dir :: enum { North, South, West, East }
 ```
 
 Currently not supported: SOA types, multi pointers, procedure pointers
