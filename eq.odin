@@ -116,11 +116,11 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 		}
 		a_tag := _get_union_tag_for_non_ptr_union(var, a)
 		b_tag := _get_union_tag_for_non_ptr_union(var, b)
-		if a_tag != b_tag {
+		if a_tag != b_tag || (!var.no_nil && a_tag == 0) {
 			return false
 		}
-		variant_ty := var.variants[a_tag] if var.no_nil else var.variants[a_tag - 1]
-		return _any_eq(variant_ty, a, b, false)
+		variant_idx := a_tag if var.no_nil else a_tag - 1
+		return _any_eq(var.variants[variant_idx], a, b, false)
 	case runtime.Type_Info_Map:
 		a_map: Raw_Map = (cast(^Raw_Map)a)^
 		b_map: Raw_Map = (cast(^Raw_Map)b)^

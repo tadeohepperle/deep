@@ -115,8 +115,11 @@ _drop_allocations_inplace :: proc(
 			}
 		}
 		tag := _get_union_tag_for_non_ptr_union(var, place)
-		variant_ty := var.variants[tag] if var.no_nil else var.variants[tag - 1]
-		_drop_allocations_inplace(variant_ty, place, allocator, false)
+		if !var.no_nil && tag == 0 {
+			return
+		}
+		variant_idx := tag if var.no_nil else tag - 1
+		_drop_allocations_inplace(var.variants[variant_idx], place, allocator, false)
 		return
 	case runtime.Type_Info_Map:
 		raw_map: Raw_Map = (cast(^Raw_Map)place)^

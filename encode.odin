@@ -109,11 +109,13 @@ _encode_any_to :: proc(
 				}
 			}
 		}
-		// write tag as int first, then write the data for this union variant
+		// write tag as int first, then write the data for this union variant (if not nil)
 		tag := _get_union_tag_for_non_ptr_union(var, place)
 		_write_len(tag, buf)
-		variant_ty := var.variants[tag] if var.no_nil else var.variants[tag - 1]
-		_encode_any_to(variant_ty, place, buf, false)
+		if var.no_nil || tag != 0 {
+			variant_idx := tag if var.no_nil else tag - 1
+			_encode_any_to(var.variants[variant_idx], place, buf, false)
+		}
 		return
 	case runtime.Type_Info_Map:
 		raw_map: Raw_Map = (cast(^Raw_Map)place)^
@@ -627,13 +629,9 @@ _decode_any :: proc(
 				}
 			}
 		}
-
-
 		// read tag, then based on that read data
 		tag := _read_len(cursor) or_return
 		if !var.no_nil && tag == 0 {
-			// this means the union was nil
-			mem.zero(place, ty.size)
 			return .None
 		}
 		_set_union_tag_for_non_ptr_union(var, place, tag)
