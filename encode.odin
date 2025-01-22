@@ -31,14 +31,16 @@ _encode_any_to :: proc(
 		_encode_any_to(type_info_base(ty), place, buf, true)
 		return
 	case runtime.Type_Info_Pointer:
-		elem_place := (cast(^rawptr)place)^
-		if elem_place != nil {
-			_write_marker(.NonNilPtr, buf)
-			_encode_any_to(var.elem, elem_place, buf, false)
-		} else {
-			_write_marker(.NilPtr, buf)
+		if var.elem != nil {
+			elem_place := (cast(^rawptr)place)^
+			if elem_place != nil {
+				_write_marker(.NonNilPtr, buf)
+				_encode_any_to(var.elem, elem_place, buf, false)
+			} else {
+				_write_marker(.NilPtr, buf)
+			}
+			return
 		}
-		return
 	case runtime.Type_Info_Slice:
 		raw_slice := cast(^Raw_Slice)place
 		_encode_slice_to(raw_slice^, var.elem, buf)
@@ -408,11 +410,13 @@ _validate_encoding_any :: proc(
 	case runtime.Type_Info_Named:
 		return _validate_encoding_any(type_info_base(ty), cursor, true)
 	case runtime.Type_Info_Pointer:
-		is_nil := _read_ptr_marker(cursor) or_return
-		if !is_nil {
-			return _validate_encoding_any(var.elem, cursor, false)
-		} else {
-			return .None
+		if var.elem != nil {
+			is_nil := _read_ptr_marker(cursor) or_return
+			if !is_nil {
+				return _validate_encoding_any(var.elem, cursor, false)
+			} else {
+				return .None
+			}
 		}
 	case runtime.Type_Info_Slice:
 		return _validate_seq(var.elem, cursor)
@@ -536,16 +540,18 @@ _decode_any :: proc(
 	case runtime.Type_Info_Named:
 		return _decode_any(type_info_base(ty), place, cursor, tracker, true)
 	case runtime.Type_Info_Pointer:
-		is_nil := _read_ptr_marker(cursor) or_return
-		ptr_place := cast(^rawptr)place
-		if !is_nil {
-			ptr := tracker_alloc(tracker, var.elem.size, var.elem.align)
-			_decode_any(var.elem, ptr, cursor, tracker, false) or_return
-			ptr_place^ = ptr
-		} else {
-			ptr_place^ = nil
+		if var.elem != nil {
+			is_nil := _read_ptr_marker(cursor) or_return
+			ptr_place := cast(^rawptr)place
+			if !is_nil {
+				ptr := tracker_alloc(tracker, var.elem.size, var.elem.align)
+				_decode_any(var.elem, ptr, cursor, tracker, false) or_return
+				ptr_place^ = ptr
+			} else {
+				ptr_place^ = nil
+			}
+			return .None
 		}
-		return .None
 	case runtime.Type_Info_Slice:
 		raw_slice := cast(^Raw_Slice)place
 		raw_slice^ = _decode_seq(var.elem, cursor, tracker) or_return

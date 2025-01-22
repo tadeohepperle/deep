@@ -24,12 +24,14 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 		base_ty := type_info_base(ty)
 		return _any_eq(base_ty, a, b, true)
 	case runtime.Type_Info_Pointer:
-		a_elem_place := (cast(^rawptr)a)^
-		b_elem_place := (cast(^rawptr)b)^
-		if a_elem_place == nil || b_elem_place == nil {
-			return a_elem_place == b_elem_place // so true if nil,nil    false otherwise
+		if var.elem != nil {
+			a_elem_place := (cast(^rawptr)a)^
+			b_elem_place := (cast(^rawptr)b)^
+			if a_elem_place == nil || b_elem_place == nil {
+				return a_elem_place == b_elem_place // so true if nil,nil    false otherwise
+			}
+			return _any_eq(var.elem, a_elem_place, b_elem_place, false)
 		}
-		return _any_eq(var.elem, a_elem_place, b_elem_place, false)
 	case runtime.Type_Info_Slice:
 		a_slice := cast(^Raw_Slice)a
 		b_slice := cast(^Raw_Slice)b

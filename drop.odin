@@ -26,8 +26,10 @@ _drop_allocations_inplace :: proc(
 		_drop_allocations_inplace(base_ty, place, allocator, true)
 		return
 	case runtime.Type_Info_Pointer:
-		_drop_ptr_type_allocation_inplace(var.elem, place, allocator)
-		return
+		if var.elem != nil {
+			_drop_ptr_type_allocation_inplace(var.elem, place, allocator)
+			return
+		}
 	case runtime.Type_Info_Slice:
 		raw_slice := cast(^Raw_Slice)place
 		if raw_slice.data != nil {
