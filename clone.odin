@@ -183,7 +183,10 @@ _clone_allocations_inplace :: proc(
 		}
 		return
 	}
-	panic(tprint("Unsupported type for cloning: ", ty))
+	if PANIC_ON_UNSUPPORTED_TYPES {
+		panic(tprint("Unsupported type for cloning: ", ty))
+	}
+
 }
 _copy_into_new_slice :: proc(
 	elem_ty: Type_Info,

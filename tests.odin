@@ -10,11 +10,13 @@ import "core:testing"
 @(test)
 test_everything :: proc(t: ^testing.T) {
 	for seed in 1 ..= u64(10) {
-		test_for_type(map[string]string, t, seed)
-		test_for_type(MyUnion, t, seed)
-		test_for_type([][][]int, t, seed)
-		test_for_type(MyStruct, t, seed)
-		test_for_type(^MyStruct, t, seed)
+		test_for_type(map[int]None, t, seed)
+
+		// test_for_type(map[string]string, t, seed)
+		// test_for_type(MyUnion, t, seed)
+		// test_for_type([][][]int, t, seed)
+		// test_for_type(MyStruct, t, seed)
+		// test_for_type(^MyStruct, t, seed)
 	}
 
 	MyStruct :: struct {

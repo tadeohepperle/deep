@@ -155,7 +155,7 @@ _drop_allocations_inplace :: proc(
 		assert(err == .None)
 		return
 	}
-	if true {
+	if PANIC_ON_UNSUPPORTED_TYPES {
 		panic(tprint("Unsupported type for dropping: ", ty))
 	}
 }

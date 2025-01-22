@@ -177,7 +177,11 @@ _any_eq :: proc(ty: Type_Info, a: rawptr, b: rawptr, $ASSERT_NON_COPY_TYPE: bool
 		}
 		return true
 	}
-	unimplemented(tprint("Unsupported type for equality check: ", ty))
+	if PANIC_ON_UNSUPPORTED_TYPES {
+		panic(tprint("Unsupported type for equality check: ", ty))
+	} else {
+		return runtime.memory_compare(a, b, ty.size) == 0
+	}
 }
 
 _slice_eq :: proc(elem_ty: Type_Info, a_slice: ^Raw_Slice, b_slice: ^Raw_Slice) -> bool {

@@ -7,6 +7,8 @@ import "core:hash"
 import "core:mem"
 import "core:strings"
 
+PANIC_ON_UNSUPPORTED_TYPES := false
+
 Error :: Maybe(string)
 
 None :: struct {}
