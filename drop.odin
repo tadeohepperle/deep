@@ -7,6 +7,9 @@ import "core:mem"
 drop :: proc(this: ^$T, allocator := context.allocator) {
 	_drop_allocations_inplace(type_info_of(T), this, allocator, false)
 }
+drop_boxed_any :: proc(boxed_any: any, allocator := context.allocator) {
+	_drop_allocations_inplace(type_info_of(boxed_any.id), boxed_any.data, allocator, false)
+}
 _drop_allocations_inplace :: proc(
 	ty: Type_Info,
 	place: rawptr,
