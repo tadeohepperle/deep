@@ -24,7 +24,7 @@ _drop_allocations_inplace :: proc(
 	$ASSERT_NON_COPY_TYPE: bool,
 ) {
 	// zero out the memory of this thing after freeing all reachable memory regions:
-	defer {mem.zero(place, ty.size)}
+	// defer {mem.zero(place, ty.size)}
 	when !ASSERT_NON_COPY_TYPE {
 		if is_copy_type(ty) {
 			return

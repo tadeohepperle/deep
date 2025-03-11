@@ -42,6 +42,12 @@ _clone_allocations_inplace :: proc(
 		}
 		raw_slice.data = _copy_into_new_slice(var.elem, raw_slice.len, raw_slice.data, allocator)
 		return
+	case runtime.Type_Info_Any:
+		raw_any := cast(^Raw_Any)place
+		if raw_any.id != {} {
+			_clone_ptr_type_allocation_inplace(type_info_of(raw_any.id), &raw_any.data, allocator)
+		}
+		return
 	case runtime.Type_Info_Dynamic_Array:
 		raw_arr := cast(^Raw_Dynamic_Array)place
 		old_arr: Raw_Dynamic_Array = raw_arr^
