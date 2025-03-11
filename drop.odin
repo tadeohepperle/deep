@@ -8,7 +8,14 @@ drop :: proc(this: ^$T, allocator := context.allocator) {
 	_drop_allocations_inplace(type_info_of(T), this, allocator, false)
 }
 drop_boxed_any :: proc(boxed_any: any, allocator := context.allocator) {
-	_drop_allocations_inplace(type_info_of(boxed_any.id), boxed_any.data, allocator, false)
+	_drop_boxed_any(transmute(Raw_Any)boxed_any, allocator)
+}
+_drop_boxed_any :: #force_inline proc(raw_boxed_any: Raw_Any, allocator := context.allocator) {
+	if raw_boxed_any.id == {} || raw_boxed_any.data == nil {
+		return
+	}
+	_drop_allocations_inplace(type_info_of(raw_boxed_any.id), raw_boxed_any.data, allocator, false)
+	mem.free(raw_boxed_any.data, allocator)
 }
 _drop_allocations_inplace :: proc(
 	ty: Type_Info,
@@ -25,7 +32,7 @@ _drop_allocations_inplace :: proc(
 	}
 	#partial switch var in ty.variant {
 	case runtime.Type_Info_Any:
-		drop_boxed_any((cast(^Raw_Any)place)^, allocator)
+		_drop_boxed_any((cast(^Raw_Any)place)^, allocator)
 	case runtime.Type_Info_Named:
 		base_ty := type_info_base(ty)
 		_drop_allocations_inplace(base_ty, place, allocator, true)
