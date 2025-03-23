@@ -130,6 +130,26 @@ _is_type_supported :: proc(ty: Type_Info) -> bool {
 	return false
 }
 
+is_simple_copy_type :: proc(ty: Type_Info) -> bool {
+	#partial switch var in ty.variant {
+	case runtime.Type_Info_Named:
+		return is_simple_copy_type(type_info_base(ty))
+	case runtime.Type_Info_Integer,
+	     runtime.Type_Info_Rune,
+	     runtime.Type_Info_Float,
+	     runtime.Type_Info_Complex,
+	     runtime.Type_Info_Quaternion,
+	     runtime.Type_Info_Boolean,
+	     runtime.Type_Info_Bit_Set,
+	     runtime.Type_Info_Enum,
+	     runtime.Type_Info_Matrix,
+	     runtime.Type_Info_Simd_Vector,
+	     runtime.Type_Info_Type_Id:
+		return true
+	}
+	return false
+}
+
 is_copy_type :: proc(ty: Type_Info) -> bool {
 	#partial switch var in ty.variant {
 	case runtime.Type_Info_Integer,

@@ -6,6 +6,7 @@ deep is an Odin package for _semi-automatic_ memory management using RTTI on (al
 - deep equality comparison
 - schemaless encoding/decoding from and to bytes
 - random value creating of any data type, great for testing
+- deep hashing of values to a u64
 
 This package is basically a kitchen sink of useful RTTI traversing functions.
 
@@ -43,6 +44,9 @@ Item :: struct {
 Dir :: enum { North, South, West, East }
 ```
 
-Currently not supported: SOA types, multi pointers, procedure pointers
+Currently not supported:
+
+- SOA types, multi pointers, procedure pointers
+- calculating hashes of hashmaps, because that would require sorting.
 
 Author: Tadeo Hepperle, 2025

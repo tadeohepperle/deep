@@ -79,6 +79,32 @@ test_for_type :: proc($T: typeid, t: ^testing.T, seed: u64) {
 	mem.tracking_allocator_destroy(&track)
 }
 
+@(test)
+test_hashing :: proc(t: ^testing.T) {
+	Faa :: struct {
+		id:   u128,
+		name: string,
+		nums: []int,
+	}
+	h1 := hash(Faa{1, "Hello", {1, 2, 3, 3, 4}})
+	h2 := hash(Faa{1, "Hell0120012", {1, 2, 3, 3, 4}})
+	h3 := hash(Faa{1, "Hello", {1, 2, 3, 3, 4}})
+	testing.expect_value(t, h1, h3)
+	testing.expect(t, h1 != h2)
+	FaaIgnore :: struct {
+		id:   u128,
+		name: string `deep:"nohash"`,
+		nums: []int,
+	}
+
+	h1 = hash(FaaIgnore{1, "Hello", {1, 2, 3, 3, 4}})
+	h2 = hash(FaaIgnore{1, "Hello120012", {1, 2, 3, 3, 4}})
+	h3 = hash(FaaIgnore{1, "Hello120012", {1, 2, 3}})
+	testing.expect_value(t, h1, h2)
+	testing.expect(t, h1 != h3)
+}
+
+
 // use like this:
 //
 // log := Logging_Allocator_Data{context.allocator}
